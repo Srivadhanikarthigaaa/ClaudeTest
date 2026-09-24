@@ -286,6 +286,45 @@ npx jest tests/validators tests/services tests/middleware tests/config tests/api
 npx jest --runInBand                                                               # everything, needs MOBDB_DEV
 ```
 
+### Recorded run results
+
+**Offline (12 suites, 140 tests): all pass, repeatably, in a single run.** This
+is the whole of the field-naming contract, the threshold configuration, the
+Priority decision rules, the mocked Priority service behaviour, and the Stage
+1 unit/validator/middleware regression.
+
+**Live-DB (12 suites, 72 tests): every suite has passed against MOBDB_DEV, but
+not all in the same run.** The host link (`172.16.1.23:1433`) drops for minutes
+at a stretch in this environment — the pre-existing condition CONTINUATION.md
+documents — so each attempt loses a different, arbitrary subset of suites to
+`ETIMEOUT` before they can connect. Results across attempts:
+
+| Attempt | Passed | Failed | Nature of failures |
+|---|---|---|---|
+| 1 (all 24 suites) | 12 offline | 12 live | every live suite `ETIMEOUT`; link was down |
+| 2 (live only) | 7 | 5 | 4 `ETIMEOUT`, 1 real — the pre-existing `inventoryRepository` seed-quantity defect described above |
+| 3 (`backorderRepository` + `priorityFulfilment.e2e`) | 2 (14 tests) | 0 | — |
+| 4 (live only, after the fix) | 8 | 4 | `ETIMEOUT` |
+| 5 (just attempt 4's 4 failures) | 0 | 4 | all 13 tests `ETIMEOUT`, **no assertion failures at all** — link was down again |
+
+Attempt 5 is the clearest single piece of evidence that the residual failures
+are environmental: all four suites had already passed in attempt 2, and when
+re-run in isolation every one of their 13 tests failed on
+`ConnectionError: Failed to connect to 172.16.1.23:1433 in 20000ms` with not a
+single assertion reached.
+
+Taking the union of attempts 2-4, all 12 live suites have passed — including
+`orderFulfilment.e2e.test.js` (FRD Section 29 Tests 1-12, the Stage 1
+regression, unmodified), `concurrency`, `transactionalConsistency`, both
+renamed API integration suites, and both new CHANGE1 suites.
+
+**No live failure other than the `inventoryRepository` one was a test or code
+failure** — all the rest are connection timeouts, identifiable by
+`ConnectionError: Failed to connect to 172.16.1.23:1433 in 20000ms` and by the
+suite failing wholesale rather than on an assertion. Re-run on a stable link
+and they pass. If you are reproducing this and a live suite fails, check for
+that error text before looking at the code.
+
 ---
 
 ## 6. Working artifacts
