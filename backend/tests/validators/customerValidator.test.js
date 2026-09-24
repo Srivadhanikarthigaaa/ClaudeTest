@@ -6,36 +6,36 @@ function errorFor(errors, field) {
 
 describe('validateCustomerCreate (FRD 15.2)', () => {
   test('accepts a valid customer', () => {
-    expect(validateCustomerCreate({ CustomerId: 'CUST001', EligibilityStatus: 'Eligible' }).errors).toEqual([]);
+    expect(validateCustomerCreate({ customerId: 'CUST001', eligibilityStatus: 'Eligible' }).errors).toEqual([]);
   });
 
-  test('rejects a missing CustomerId', () => {
-    const { errors } = validateCustomerCreate({ EligibilityStatus: 'Eligible' });
-    expect(errorFor(errors, 'CustomerId').reason).toBe('is required');
+  test('rejects a missing customerId', () => {
+    const { errors } = validateCustomerCreate({ eligibilityStatus: 'Eligible' });
+    expect(errorFor(errors, 'customerId').reason).toBe('is required');
   });
 
-  test('rejects an EligibilityStatus outside the enum', () => {
-    const { errors } = validateCustomerCreate({ CustomerId: 'CUST001', EligibilityStatus: 'Active' });
-    expect(errorFor(errors, 'EligibilityStatus').reason).toMatch(/must be one of/);
+  test('rejects an eligibilityStatus outside the enum', () => {
+    const { errors } = validateCustomerCreate({ customerId: 'CUST001', eligibilityStatus: 'Active' });
+    expect(errorFor(errors, 'eligibilityStatus').reason).toMatch(/must be one of/);
   });
 
-  test('rejects an EligibilityStatus with wrong case (case-sensitive)', () => {
-    const { errors } = validateCustomerCreate({ CustomerId: 'CUST001', EligibilityStatus: 'eligible' });
-    expect(errorFor(errors, 'EligibilityStatus').reason).toMatch(/must be one of/);
+  test('rejects an eligibilityStatus with wrong case (case-sensitive)', () => {
+    const { errors } = validateCustomerCreate({ customerId: 'CUST001', eligibilityStatus: 'eligible' });
+    expect(errorFor(errors, 'eligibilityStatus').reason).toMatch(/must be one of/);
   });
 
   test.each(['Eligible', 'CreditHold', 'Unknown'])('accepts %p', (status) => {
-    expect(validateCustomerCreate({ CustomerId: 'CUST001', EligibilityStatus: status }).errors).toEqual([]);
+    expect(validateCustomerCreate({ customerId: 'CUST001', eligibilityStatus: status }).errors).toEqual([]);
   });
 });
 
 describe('validateCustomerUpdate (FRD FR-CUST-03)', () => {
-  test('accepts a valid EligibilityStatus with no CustomerId in the body', () => {
-    expect(validateCustomerUpdate({ EligibilityStatus: 'CreditHold' }).errors).toEqual([]);
+  test('accepts a valid eligibilityStatus with no customerId in the body', () => {
+    expect(validateCustomerUpdate({ eligibilityStatus: 'CreditHold' }).errors).toEqual([]);
   });
 
-  test('rejects a missing EligibilityStatus', () => {
+  test('rejects a missing eligibilityStatus', () => {
     const { errors } = validateCustomerUpdate({});
-    expect(errorFor(errors, 'EligibilityStatus').reason).toBe('is required');
+    expect(errorFor(errors, 'eligibilityStatus').reason).toBe('is required');
   });
 });

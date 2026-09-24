@@ -19,9 +19,19 @@ actual headed content in the FRD file; each was mapped to the closest real
 content as it came up, and is flagged again here since this is the final,
 stakeholder-facing document.)
 
+**CHANGE1 note:** none of the ten items below were reopened or resolved by
+CHANGE1. Two *new* under-specified points came from the CHANGE1 change
+document itself and were resolved during that implementation — date
+feasibility still gating a Priority warehouse's contribution, and "≥ 100%
+available" being `Released` with no zero-quantity backorder. Both are written
+up in [CHANGE1.md](CHANGE1.md) § 2, not repeated here. CHANGE1 also renamed
+every API field to lowerCamelCase, so the response shapes quoted below now
+read `{ "customerId": ..., "error": ... }` and so on; the decisions
+they record are unchanged.
+
 | # | Question | What was implemented | Status |
 |---|---|---|---|
-| 1 | What happens when an order references a `CustomerId` that doesn't exist at all (vs. existing with CreditHold/Unknown)? | `404` with `{ "CustomerId": "<id>", "Error": "Customer not found" }`, nothing persisted. The response shape is inferred (analogous to the confirmed `GET /orders` 404 shape), not FRD-dictated. | **Open** — confirm status code and shape. |
+| 1 | What happens when an order references a `customerId` that doesn't exist at all (vs. existing with CreditHold/Unknown)? | `404` with `{ "customerId": "<id>", "error": "Customer not found" }`, nothing persisted. The response shape is inferred (analogous to the confirmed `GET /orders` 404 shape), not FRD-dictated. | **Open** — confirm status code and shape. |
 | 2 | Exact literal reason codes for "insufficient inventory" and "cannot meet delivery date" (only `"blocked-credit"` is confirmed). | `"blocked-insufficient-inventory"` and `"blocked-delivery-date"`, as named constants in [backend/src/services/reasonCodes.js](../backend/src/services/reasonCodes.js) — every test and the engine itself reference the constants, never the raw strings, so a confirmed literal only needs to change in one file. | **Open** — placeholders, unconfirmed. |
 | 3 | A `ProductId` with zero `Inventory` rows anywhere. | Treated as "no qualifying warehouse" → `Blocked` / `blocked-insufficient-inventory` (FRD's own documented assumption A2). | **Open** — pending confirmation, though low-risk. |
 | 4 | Delete/deactivation of `Customer` or `Inventory` records. | Not built. No delete endpoint exists for either entity (Phase 4's CRUD is itself still outstanding — see the note in `docs/FINAL_VERIFICATION.md`). | **Open**, and moot until Phase 4 exists. |

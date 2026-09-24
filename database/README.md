@@ -24,6 +24,14 @@ credentials — see the root `.env.example` for the placeholder-only template).
   `> 0` and incorrectly rejected legitimate decrements to exactly zero (found by
   running Phase 2's repository tests against live MOBDB_DEV). Only touches that
   one constraint; guarded so it's a no-op once already applied.
+- `schema/003_change1_backorder_and_multi_allocation.sql` — the CHANGE1 migration.
+  Creates the `Backorder` table; replaces `UQ_InventoryAllocation_OrderId`
+  ("one allocation per order") with `UQ_InventoryAllocation_Order_Warehouse`
+  ("one allocation per order per warehouse"), so a Priority order can draw from
+  several warehouses; and widens `CK_FulfilmentResult_Status` from
+  `'PartiallyReleased'` to `'Partially Released'`. No data migration is needed —
+  Stage 1 never produced the old value. Deletes nothing; guarded so re-running
+  it is a no-op. See [../docs/CHANGE1.md](../docs/CHANGE1.md) § 3.
 - `seed/001_seed_data.sql` — loads the exact FRD Section 39 seed rows, each guarded
   by `IF NOT EXISTS`, so no existing row (seed or unrelated) is ever deleted.
 - `stored-procedures/` — reserved for Phase 7+ (`EvaluateAndPersistOrderFulfilment`,
@@ -35,14 +43,16 @@ credentials — see the root `.env.example` for the placeholder-only template).
 sqlcmd -S <DB_SERVER>,<DB_PORT> -U <DB_USER> -P <DB_PASSWORD> -C -i schema/000_create_database.sql
 sqlcmd -S <DB_SERVER>,<DB_PORT> -U <DB_USER> -P <DB_PASSWORD> -C -i schema/001_create_tables.sql
 sqlcmd -S <DB_SERVER>,<DB_PORT> -U <DB_USER> -P <DB_PASSWORD> -C -i schema/002_fix_inventory_available_quantity_constraint.sql
+sqlcmd -S <DB_SERVER>,<DB_PORT> -U <DB_USER> -P <DB_PASSWORD> -C -i schema/003_change1_backorder_and_multi_allocation.sql
 sqlcmd -S <DB_SERVER>,<DB_PORT> -U <DB_USER> -P <DB_PASSWORD> -C -i seed/001_seed_data.sql
 ```
 
 (`-C` trusts the server certificate, matching `DB_TRUST_SERVER_CERTIFICATE=true` for
 this environment. Or open/execute the same files in SSMS / Azure Data Studio.)
 
-All three scripts are safe to run again later — they only create what's missing
-and insert rows that aren't already there.
+All of these are safe to run again later — they only create what's missing and
+insert rows that aren't already there. The one exception to "only creates" is
+`003`, which drops and replaces two constraints on purpose (and no data).
 
 ## If the Order Fulfilment tables already exist in MOBDB_DEV
 

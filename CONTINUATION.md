@@ -7,11 +7,24 @@ points to.
 
 ## Current status (as of this note)
 
-**Phases 0-11 of the build plan are complete, committed, and pushed** to
+**Phases 0-11 of the build plan, plus CHANGE1, are complete and committed** to
 `https://github.com/Srivadhanikarthigaaa/ClaudeTest` on branch `main`. The
 working tree was clean at last check — if it isn't when you read this, the
 person may have made further uncommitted changes; check `git status` and
 `git log` before assuming anything.
+
+**CHANGE1 (git tag `CHANGE1`)** layered a change document on top of Stage 1:
+lowerCamelCase API fields everywhere, the `"Partially Released"` status
+literal, a configurable partial-release threshold
+(`PARTIAL_RELEASE_THRESHOLD_PERCENT`, default 70), a `Backorder` table,
+multiple allocation rows per order, and multi-warehouse fulfilment for
+`Priority` customers. Standard-customer behaviour is unchanged.
+**Read [docs/CHANGE1.md](docs/CHANGE1.md) before touching the fulfilment
+logic, the API field names or the schema** — it records two assumptions that
+were resolved by the implementer rather than specified, and where to reverse
+each one. The DB migration is
+`database/schema/003_change1_backorder_and_multi_allocation.sql`; it has been
+applied to MOBDB_DEV.
 
 What's built:
 - **Database**: MOBDB_DEV schema + seed scripts (`database/`), including a
@@ -72,6 +85,14 @@ flag the conflict again rather than silently building one.
 - Database name: the FRD narrative says `M08935_OrderFulfilment`; the real
   target is `MOBDB_DEV` (a pre-existing environment database). Never create
   or reference `M08935_OrderFulfilment`.
+- **API fields are lowerCamelCase; the domain model and repositories stay
+  PascalCase** (matching the SQL column names). The two meet at exactly one
+  seam, `backend/src/api/serializers.js`. Don't "fix" the internals to
+  camelCase — the mapping has to exist somewhere, and it is deliberately
+  concentrated in that one file. See docs/CHANGE1.md § 1.1.
+- The two CHANGE1 assumptions (date feasibility gates a Priority warehouse's
+  contribution; ≥ 100% available is `Released` with no backorder) are
+  documented decisions, not oversights — docs/CHANGE1.md § 2.
 - HTTP status split: `201` on first submission, `200` on idempotent replay
   (FRD Section 30 #9 — this project's own resolution, not FRD-dictated).
 - Reason-code literals `blocked-insufficient-inventory` / `blocked-delivery-date`

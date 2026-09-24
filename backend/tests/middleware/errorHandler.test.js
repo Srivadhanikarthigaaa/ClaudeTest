@@ -10,26 +10,27 @@ function mockRes() {
 }
 
 describe('errorHandler (FRD Section 28/58, FR-SEC-05)', () => {
-  test('ValidationError -> 400 with Field/Reason shape', () => {
+  // CHANGE1 requirement 1: every error body field is lowerCamelCase.
+  test('ValidationError -> 400 with field/reason shape', () => {
     const res = mockRes();
-    const err = new ValidationError([{ field: 'Quantity', reason: 'must be greater than 0' }]);
+    const err = new ValidationError([{ field: 'quantity', reason: 'must be greater than 0' }]);
     errorHandler(err, {}, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({ Errors: [{ Field: 'Quantity', Reason: 'must be greater than 0' }] });
+    expect(res.json).toHaveBeenCalledWith({ errors: [{ field: 'quantity', reason: 'must be greater than 0' }] });
   });
 
   test('OrderNotFoundError -> exact 404 shape from FRD Section 34', () => {
     const res = mockRes();
     errorHandler(new OrderNotFoundError('ORD9999'), {}, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith({ OrderId: 'ORD9999', Error: 'No order found' });
+    expect(res.json).toHaveBeenCalledWith({ orderId: 'ORD9999', error: 'No order found' });
   });
 
-  test('CustomerNotFoundError -> 404 with CustomerId shape', () => {
+  test('CustomerNotFoundError -> 404 with customerId shape', () => {
     const res = mockRes();
     errorHandler(new CustomerNotFoundError('CUSTX'), {}, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith({ CustomerId: 'CUSTX', Error: 'Customer not found' });
+    expect(res.json).toHaveBeenCalledWith({ customerId: 'CUSTX', error: 'Customer not found' });
   });
 
   test('a tagged client error (e.g. 409 conflict) uses its own status and message', () => {
@@ -38,7 +39,7 @@ describe('errorHandler (FRD Section 28/58, FR-SEC-05)', () => {
     err.status = 409;
     errorHandler(err, {}, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(409);
-    expect(res.json).toHaveBeenCalledWith({ Error: 'Lost the allocation race' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'Lost the allocation race' });
   });
 
   test('an unhandled error -> 500 with no internal detail leaked', () => {
@@ -47,7 +48,7 @@ describe('errorHandler (FRD Section 28/58, FR-SEC-05)', () => {
     const err = new Error('RequestError: connection string is server=172.16.1.23;password=secret');
     errorHandler(err, {}, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(500);
-    expect(res.json).toHaveBeenCalledWith({ Error: 'Internal server error' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'Internal server error' });
     const jsonArg = res.json.mock.calls[0][0];
     expect(JSON.stringify(jsonArg)).not.toMatch(/172\.16\.1\.23|password/);
     consoleSpy.mockRestore();
