@@ -4,13 +4,16 @@ import { validateOrderForm } from '../orderValidation';
 import Field from './Field';
 import FulfilmentResultView from './FulfilmentResultView';
 
+// CHANGE1 requirement 1: form state keys ARE the API's lowerCamelCase field
+// names, so the form body needs no translation and a 400's `field` addresses
+// the right input directly.
 const EMPTY_FORM = {
-  OrderId: '',
-  CustomerId: '',
-  CustomerType: 'Standard',
-  ProductId: '',
-  Quantity: '',
-  PromisedDeliveryDate: '',
+  orderId: '',
+  customerId: '',
+  customerType: 'Standard',
+  productId: '',
+  quantity: '',
+  promisedDeliveryDate: '',
 };
 
 // FRD Section 24 (FR-FE-03/04/05) — order submission form + result display.
@@ -41,16 +44,16 @@ export default function OrderForm() {
 
     setSubmitting(true);
     try {
-      const payload = { ...values, Quantity: Number(values.Quantity) };
+      const payload = { ...values, quantity: Number(values.quantity) };
       const response = await submitOrder(payload);
       setResult(response); // FR-FE-05: shown exactly as the backend returned it
     } catch (err) {
-      if (err.status === 400 && Array.isArray(err.body?.Errors)) {
+      if (err.status === 400 && Array.isArray(err.body?.errors)) {
         const fieldErrors = {};
-        for (const { Field: field, Reason: reason } of err.body.Errors) fieldErrors[field] = reason;
+        for (const { field, reason } of err.body.errors) fieldErrors[field] = reason;
         setErrors(fieldErrors);
       } else {
-        setApiError(err.body?.Error || err.message);
+        setApiError(err.body?.error || err.message);
       }
     } finally {
       setSubmitting(false);
@@ -60,36 +63,36 @@ export default function OrderForm() {
   return (
     <div className="screen">
       <form className="stack-form" onSubmit={handleSubmit}>
-        <Field label="Order Id" htmlFor="OrderId" error={errors.OrderId}>
-          <input id="OrderId" value={values.OrderId} onChange={handleChange('OrderId')} />
+        <Field label="Order Id" htmlFor="orderId" error={errors.orderId}>
+          <input id="orderId" value={values.orderId} onChange={handleChange('orderId')} />
         </Field>
 
-        <Field label="Customer Id" htmlFor="CustomerId" error={errors.CustomerId}>
-          <input id="CustomerId" value={values.CustomerId} onChange={handleChange('CustomerId')} />
+        <Field label="Customer Id" htmlFor="customerId" error={errors.customerId}>
+          <input id="customerId" value={values.customerId} onChange={handleChange('customerId')} />
         </Field>
 
-        <Field label="Customer Type" htmlFor="CustomerType" error={errors.CustomerType}>
-          <select id="CustomerType" value={values.CustomerType} onChange={handleChange('CustomerType')}>
+        <Field label="Customer Type" htmlFor="customerType" error={errors.customerType}>
+          <select id="customerType" value={values.customerType} onChange={handleChange('customerType')}>
             <option value="Standard">Standard</option>
             <option value="Priority">Priority</option>
           </select>
         </Field>
 
-        <Field label="Product Id" htmlFor="ProductId" error={errors.ProductId}>
-          <input id="ProductId" value={values.ProductId} onChange={handleChange('ProductId')} />
+        <Field label="Product Id" htmlFor="productId" error={errors.productId}>
+          <input id="productId" value={values.productId} onChange={handleChange('productId')} />
         </Field>
 
-        <Field label="Quantity" htmlFor="Quantity" error={errors.Quantity}>
-          <input id="Quantity" type="number" value={values.Quantity} onChange={handleChange('Quantity')} />
+        <Field label="Quantity" htmlFor="quantity" error={errors.quantity}>
+          <input id="quantity" type="number" value={values.quantity} onChange={handleChange('quantity')} />
         </Field>
 
-        <Field label="Promised Delivery Date" htmlFor="PromisedDeliveryDate" error={errors.PromisedDeliveryDate}>
+        <Field label="Promised Delivery Date" htmlFor="promisedDeliveryDate" error={errors.promisedDeliveryDate}>
           <input
-            id="PromisedDeliveryDate"
+            id="promisedDeliveryDate"
             type="text"
             placeholder="YYYY-MM-DD"
-            value={values.PromisedDeliveryDate}
-            onChange={handleChange('PromisedDeliveryDate')}
+            value={values.promisedDeliveryDate}
+            onChange={handleChange('promisedDeliveryDate')}
           />
         </Field>
 

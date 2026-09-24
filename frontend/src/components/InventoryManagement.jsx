@@ -3,10 +3,11 @@ import { listInventory, createInventory, updateInventory } from '../api';
 import { validateInventoryForm, WAREHOUSE_IDS } from '../inventoryValidation';
 import Field from './Field';
 
-const EMPTY_FORM = { ProductId: '', WarehouseId: 'WH-A', AvailableQuantity: '', EarliestDispatchDate: '' };
+// CHANGE1 requirement 1: lowerCamelCase field names throughout, matching the API.
+const EMPTY_FORM = { productId: '', warehouseId: 'WH-A', availableQuantity: '', earliestDispatchDate: '' };
 
 function rowKey(row) {
-  return `${row.ProductId}|${row.WarehouseId}`;
+  return `${row.productId}|${row.warehouseId}`;
 }
 
 // FRD Section 9.2, FR-FE-02 — Inventory Management screen: view inventory
@@ -28,11 +29,11 @@ export default function InventoryManagement() {
       setLoadError(null);
       const nextEdits = {};
       for (const row of data) {
-        nextEdits[rowKey(row)] = { AvailableQuantity: String(row.AvailableQuantity), EarliestDispatchDate: row.EarliestDispatchDate };
+        nextEdits[rowKey(row)] = { availableQuantity: String(row.availableQuantity), earliestDispatchDate: row.earliestDispatchDate };
       }
       setEdits(nextEdits);
     } catch (err) {
-      setLoadError(err.body?.Error || err.message);
+      setLoadError(err.body?.error || err.message);
     }
   }
 
@@ -62,18 +63,18 @@ export default function InventoryManagement() {
     setErrors({});
     setSubmitting(true);
     try {
-      await createInventory({ ...form, AvailableQuantity: Number(form.AvailableQuantity) });
+      await createInventory({ ...form, availableQuantity: Number(form.availableQuantity) });
       setForm(EMPTY_FORM);
       await reload();
     } catch (err) {
-      if (err.status === 400 && Array.isArray(err.body?.Errors)) {
+      if (err.status === 400 && Array.isArray(err.body?.errors)) {
         const fieldErrors = {};
-        for (const { Field: field, Reason: reason } of err.body.Errors) fieldErrors[field] = reason;
+        for (const { field, reason } of err.body.errors) fieldErrors[field] = reason;
         setErrors(fieldErrors);
       } else if (err.status === 409) {
-        setErrors({ ProductId: 'that (ProductId, WarehouseId) combination already exists' });
+        setErrors({ productId: 'that (productId, warehouseId) combination already exists' });
       } else {
-        setLoadError(err.body?.Error || err.message);
+        setLoadError(err.body?.error || err.message);
       }
     } finally {
       setSubmitting(false);
@@ -93,14 +94,14 @@ export default function InventoryManagement() {
       return;
     }
     try {
-      await updateInventory(row.ProductId, row.WarehouseId, {
-        availableQuantity: Number(edited.AvailableQuantity),
-        earliestDispatchDate: edited.EarliestDispatchDate,
+      await updateInventory(row.productId, row.warehouseId, {
+        availableQuantity: Number(edited.availableQuantity),
+        earliestDispatchDate: edited.earliestDispatchDate,
       });
       setRowErrors((prev) => ({ ...prev, [key]: null }));
       await reload();
     } catch (err) {
-      setRowErrors((prev) => ({ ...prev, [key]: err.body?.Error || err.message }));
+      setRowErrors((prev) => ({ ...prev, [key]: err.body?.error || err.message }));
     }
   }
 
@@ -123,11 +124,11 @@ export default function InventoryManagement() {
       </div>
 
       <form className="inline-form" onSubmit={handleCreate}>
-        <Field label="Product Id" htmlFor="new-inv-product" error={errors.ProductId}>
-          <input id="new-inv-product" value={form.ProductId} onChange={handleFormChange('ProductId')} />
+        <Field label="Product Id" htmlFor="new-inv-product" error={errors.productId}>
+          <input id="new-inv-product" value={form.productId} onChange={handleFormChange('productId')} />
         </Field>
-        <Field label="Warehouse Id" htmlFor="new-inv-warehouse" error={errors.WarehouseId}>
-          <select id="new-inv-warehouse" value={form.WarehouseId} onChange={handleFormChange('WarehouseId')}>
+        <Field label="Warehouse Id" htmlFor="new-inv-warehouse" error={errors.warehouseId}>
+          <select id="new-inv-warehouse" value={form.warehouseId} onChange={handleFormChange('warehouseId')}>
             {WAREHOUSE_IDS.map((id) => (
               <option key={id} value={id}>
                 {id}
@@ -135,15 +136,15 @@ export default function InventoryManagement() {
             ))}
           </select>
         </Field>
-        <Field label="Available Quantity" htmlFor="new-inv-qty" error={errors.AvailableQuantity}>
-          <input id="new-inv-qty" type="number" value={form.AvailableQuantity} onChange={handleFormChange('AvailableQuantity')} />
+        <Field label="Available Quantity" htmlFor="new-inv-qty" error={errors.availableQuantity}>
+          <input id="new-inv-qty" type="number" value={form.availableQuantity} onChange={handleFormChange('availableQuantity')} />
         </Field>
-        <Field label="Earliest Dispatch Date" htmlFor="new-inv-date" error={errors.EarliestDispatchDate}>
+        <Field label="Earliest Dispatch Date" htmlFor="new-inv-date" error={errors.earliestDispatchDate}>
           <input
             id="new-inv-date"
             placeholder="YYYY-MM-DD"
-            value={form.EarliestDispatchDate}
-            onChange={handleFormChange('EarliestDispatchDate')}
+            value={form.earliestDispatchDate}
+            onChange={handleFormChange('earliestDispatchDate')}
           />
         </Field>
         <button type="submit" disabled={submitting}>
@@ -166,22 +167,22 @@ export default function InventoryManagement() {
         <tbody>
           {rows.map((row) => {
             const key = rowKey(row);
-            const edited = edits[key] || { AvailableQuantity: '', EarliestDispatchDate: '' };
+            const edited = edits[key] || { availableQuantity: '', earliestDispatchDate: '' };
             return (
               <tr key={key}>
-                <td>{row.ProductId}</td>
-                <td>{row.WarehouseId}</td>
+                <td>{row.productId}</td>
+                <td>{row.warehouseId}</td>
                 <td>
                   <input
                     type="number"
-                    value={edited.AvailableQuantity}
-                    onChange={handleEditChange(key, 'AvailableQuantity')}
+                    value={edited.availableQuantity}
+                    onChange={handleEditChange(key, 'availableQuantity')}
                   />
                 </td>
                 <td>
                   <input
-                    value={edited.EarliestDispatchDate}
-                    onChange={handleEditChange(key, 'EarliestDispatchDate')}
+                    value={edited.earliestDispatchDate}
+                    onChange={handleEditChange(key, 'earliestDispatchDate')}
                   />
                 </td>
                 <td>

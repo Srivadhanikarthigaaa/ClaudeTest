@@ -36,7 +36,8 @@ async function request(path, options = {}) {
 
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body.Error || `Request failed with status ${response.status}`);
+    // CHANGE1 requirement 1: the API's error field is `error` (lowerCamelCase).
+    const error = new Error(body.error || `Request failed with status ${response.status}`);
     error.status = response.status;
     error.body = body;
     throw error;
@@ -67,7 +68,7 @@ export function createCustomer(customer) {
 export function updateCustomerEligibility(customerId, eligibilityStatus) {
   return request(`/customers/${encodeURIComponent(customerId)}`, {
     method: 'PUT',
-    body: JSON.stringify({ EligibilityStatus: eligibilityStatus }),
+    body: JSON.stringify({ eligibilityStatus }),
   });
 }
 
@@ -87,7 +88,7 @@ export function createInventory(inventory) {
 export function updateInventory(productId, warehouseId, { availableQuantity, earliestDispatchDate }) {
   return request(`/inventory/${encodeURIComponent(productId)}/${encodeURIComponent(warehouseId)}`, {
     method: 'PUT',
-    body: JSON.stringify({ AvailableQuantity: availableQuantity, EarliestDispatchDate: earliestDispatchDate }),
+    body: JSON.stringify({ availableQuantity, earliestDispatchDate }),
   });
 }
 

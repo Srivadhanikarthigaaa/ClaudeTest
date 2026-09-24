@@ -1,5 +1,6 @@
 // Mirrors backend/src/validators/inventoryValidator.js (FRD Section 15.3) —
 // client-side convenience only, never a substitute for server validation.
+// CHANGE1 requirement 1: lowerCamelCase field names, matching the API.
 const WAREHOUSE_IDS = ['WH-A', 'WH-B', 'WH-C'];
 
 function isISODate(value) {
@@ -18,26 +19,26 @@ export function validateInventoryForm(values, { isCreate }) {
   const errors = {};
 
   if (isCreate) {
-    if (!values.ProductId) errors.ProductId = 'is required';
-    if (!values.WarehouseId) {
-      errors.WarehouseId = 'is required';
-    } else if (!WAREHOUSE_IDS.includes(values.WarehouseId)) {
-      errors.WarehouseId = `must be one of: ${WAREHOUSE_IDS.join(', ')}`;
+    if (!values.productId) errors.productId = 'is required';
+    if (!values.warehouseId) {
+      errors.warehouseId = 'is required';
+    } else if (!WAREHOUSE_IDS.includes(values.warehouseId)) {
+      errors.warehouseId = `must be one of: ${WAREHOUSE_IDS.join(', ')}`;
     }
   }
 
-  if (values.AvailableQuantity === '' || values.AvailableQuantity === null || values.AvailableQuantity === undefined) {
-    errors.AvailableQuantity = 'is required';
+  if (values.availableQuantity === '' || values.availableQuantity === null || values.availableQuantity === undefined) {
+    errors.availableQuantity = 'is required';
   } else {
-    const quantity = Number(values.AvailableQuantity);
-    if (!Number.isInteger(quantity)) errors.AvailableQuantity = 'must be an integer';
-    else if (quantity <= 0) errors.AvailableQuantity = 'must be greater than 0';
+    const quantity = Number(values.availableQuantity);
+    if (!Number.isInteger(quantity)) errors.availableQuantity = 'must be an integer';
+    else if (quantity <= 0) errors.availableQuantity = 'must be greater than 0';
   }
 
-  if (!values.EarliestDispatchDate) {
-    errors.EarliestDispatchDate = 'is required';
-  } else if (!isISODate(values.EarliestDispatchDate)) {
-    errors.EarliestDispatchDate = 'must match YYYY-MM-DD exactly';
+  if (!values.earliestDispatchDate) {
+    errors.earliestDispatchDate = 'is required';
+  } else if (!isISODate(values.earliestDispatchDate)) {
+    errors.earliestDispatchDate = 'must match YYYY-MM-DD exactly';
   }
 
   return errors;

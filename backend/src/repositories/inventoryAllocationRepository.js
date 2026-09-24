@@ -22,8 +22,14 @@ async function findByOrderId(orderId, transaction) {
   const result = await request
     .input('OrderId', sql.VarChar(50), orderId)
     .query(
+      // ORDER BY WarehouseId matters since CHANGE1: a Priority order can hold
+      // several allocation rows, and an idempotent replay has to return them
+      // in the same order every time — which an unordered SELECT does not
+      // guarantee. WarehouseId sorts WH-A, WH-B, WH-C, i.e. the same priority
+      // order the allocations were planned in.
       `SELECT AllocationId, OrderId, WarehouseId, AllocatedQuantity
-       FROM dbo.InventoryAllocation WHERE OrderId = @OrderId`
+       FROM dbo.InventoryAllocation WHERE OrderId = @OrderId
+       ORDER BY WarehouseId`
     );
   return result.recordset;
 }

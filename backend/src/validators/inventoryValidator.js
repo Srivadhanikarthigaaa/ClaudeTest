@@ -5,18 +5,19 @@ const validateFields = require('./validateFields');
 const AVAILABLE_QUANTITY_RULES = [required, isType('integer'), isPositive];
 const EARLIEST_DISPATCH_DATE_RULES = [required, isISODate];
 
+// CHANGE1 requirement 1: keys are the lowerCamelCase wire field names.
 const INVENTORY_CREATE_SCHEMA = {
-  ProductId: [required, isType('string')],
-  WarehouseId: [required, isType('string'), isOneOf(['WH-A', 'WH-B', 'WH-C'])],
-  AvailableQuantity: AVAILABLE_QUANTITY_RULES,
-  EarliestDispatchDate: EARLIEST_DISPATCH_DATE_RULES,
+  productId: [required, isType('string')],
+  warehouseId: [required, isType('string'), isOneOf(['WH-A', 'WH-B', 'WH-C'])],
+  availableQuantity: AVAILABLE_QUANTITY_RULES,
+  earliestDispatchDate: EARLIEST_DISPATCH_DATE_RULES,
 };
 
-// FR-INV-03: update touches only AvailableQuantity/EarliestDispatchDate
-// (ProductId + WarehouseId identify the existing row and come from the path).
+// FR-INV-03: update touches only availableQuantity/earliestDispatchDate
+// (productId + warehouseId identify the existing row and come from the path).
 const INVENTORY_UPDATE_SCHEMA = {
-  AvailableQuantity: AVAILABLE_QUANTITY_RULES,
-  EarliestDispatchDate: EARLIEST_DISPATCH_DATE_RULES,
+  availableQuantity: AVAILABLE_QUANTITY_RULES,
+  earliestDispatchDate: EARLIEST_DISPATCH_DATE_RULES,
 };
 
 function validateInventoryCreate(payload) {

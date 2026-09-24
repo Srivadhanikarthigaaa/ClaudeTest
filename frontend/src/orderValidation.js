@@ -2,6 +2,10 @@
 // client-side convenience only, never a substitute for server validation
 // (FRD Section 59, FR-VAL-05). Returns { [fieldName]: reason } for each
 // invalid field, empty object when the form is valid.
+//
+// CHANGE1 requirement 1: the field names here are the lowerCamelCase wire
+// names, so a server-returned `field` and a client-computed key land in the
+// same slot of the form's error map.
 function isISODate(value) {
   if (typeof value !== 'string') return false;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -19,29 +23,29 @@ function isISODate(value) {
 export function validateOrderForm(values) {
   const errors = {};
 
-  if (!values.OrderId) errors.OrderId = 'is required';
-  if (!values.CustomerId) errors.CustomerId = 'is required';
+  if (!values.orderId) errors.orderId = 'is required';
+  if (!values.customerId) errors.customerId = 'is required';
 
-  if (!values.CustomerType) {
-    errors.CustomerType = 'is required';
-  } else if (!['Standard', 'Priority'].includes(values.CustomerType)) {
-    errors.CustomerType = 'must be one of: Standard, Priority';
+  if (!values.customerType) {
+    errors.customerType = 'is required';
+  } else if (!['Standard', 'Priority'].includes(values.customerType)) {
+    errors.customerType = 'must be one of: Standard, Priority';
   }
 
-  if (!values.ProductId) errors.ProductId = 'is required';
+  if (!values.productId) errors.productId = 'is required';
 
-  if (values.Quantity === '' || values.Quantity === null || values.Quantity === undefined) {
-    errors.Quantity = 'is required';
+  if (values.quantity === '' || values.quantity === null || values.quantity === undefined) {
+    errors.quantity = 'is required';
   } else {
-    const quantity = Number(values.Quantity);
-    if (!Number.isInteger(quantity)) errors.Quantity = 'must be an integer';
-    else if (quantity <= 0) errors.Quantity = 'must be greater than 0';
+    const quantity = Number(values.quantity);
+    if (!Number.isInteger(quantity)) errors.quantity = 'must be an integer';
+    else if (quantity <= 0) errors.quantity = 'must be greater than 0';
   }
 
-  if (!values.PromisedDeliveryDate) {
-    errors.PromisedDeliveryDate = 'is required';
-  } else if (!isISODate(values.PromisedDeliveryDate)) {
-    errors.PromisedDeliveryDate = 'must match YYYY-MM-DD exactly';
+  if (!values.promisedDeliveryDate) {
+    errors.promisedDeliveryDate = 'is required';
+  } else if (!isISODate(values.promisedDeliveryDate)) {
+    errors.promisedDeliveryDate = 'must match YYYY-MM-DD exactly';
   }
 
   return errors;

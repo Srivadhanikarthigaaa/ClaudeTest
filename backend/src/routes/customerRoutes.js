@@ -5,7 +5,7 @@ const router = express.Router();
 
 router.post('/customers', controller.create);
 router.get('/customers', controller.list);
-router.get('/customers/:CustomerId', controller.get);
-router.put('/customers/:CustomerId', controller.update);
+router.get('/customers/:customerId', controller.get);
+router.put('/customers/:customerId', controller.update);
 
 module.exports = router;

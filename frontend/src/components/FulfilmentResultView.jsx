@@ -2,23 +2,34 @@
 // quantity; Blocked shows only the reason — allocation fields are never
 // rendered for a Blocked order. Displays exactly what the backend returned,
 // never recomputed (FR-FE-05).
+//
+// CHANGE1: fields are lowerCamelCase, and a "Partially Released" result shows
+// its allocations (which may span several warehouses, for a Priority order)
+// alongside the quantity that went on backorder.
+const BLOCKED = 'Blocked';
+const PARTIALLY_RELEASED = 'Partially Released';
+
 export default function FulfilmentResultView({ result }) {
-  const isBlocked = result.Status === 'Blocked';
+  const isBlocked = result.status === BLOCKED;
+  const isPartial = result.status === PARTIALLY_RELEASED;
 
   return (
     <div className={`result result-${isBlocked ? 'blocked' : 'released'}`}>
-      <p className="result-order-id">Order Id: {result.OrderId}</p>
+      <p className="result-order-id">Order Id: {result.orderId}</p>
       <p className="result-status">
-        Status: <span className="status-badge">{result.Status}</span>
+        Status: <span className="status-badge">{result.status}</span>
       </p>
 
-      {isBlocked && <p>Reason: {result.Reason}</p>}
+      {isBlocked && <p>Reason: {result.reason}</p>}
+
+      {!isBlocked && <p>Released Quantity: {result.releasedQuantity}</p>}
+      {isPartial && <p>Backordered Quantity: {result.backorderedQuantity}</p>}
 
       {!isBlocked &&
-        result.Allocations.map((allocation) => (
-          <div className="allocation" key={allocation.WarehouseId}>
-            <p>Warehouse: {allocation.WarehouseId}</p>
-            <p>Allocated Quantity: {allocation.AllocatedQuantity}</p>
+        result.allocations.map((allocation) => (
+          <div className="allocation" key={allocation.warehouseId}>
+            <p>Warehouse: {allocation.warehouseId}</p>
+            <p>Allocated Quantity: {allocation.allocatedQuantity}</p>
           </div>
         ))}
     </div>

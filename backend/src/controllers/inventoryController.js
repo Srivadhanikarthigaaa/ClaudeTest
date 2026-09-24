@@ -1,15 +1,17 @@
 // FRD Section 9.2, Section 22.3 (inferred contract, Section 30 item 10).
+// CHANGE1 requirement 1: lowerCamelCase on the wire, mapped by api/serializers.js.
 const { validateInventoryCreate, validateInventoryUpdate } = require('../validators/inventoryValidator');
 const ValidationError = require('../validators/ValidationError');
 const inventoryRepository = require('../repositories/inventoryRepository');
 const { InventoryNotFoundError } = require('../services/errors');
+const { toInventoryInput, toInventoryResponse } = require('../api/serializers');
 
 async function create(req, res, next) {
   try {
     const { errors } = validateInventoryCreate(req.body);
     if (errors.length > 0) throw new ValidationError(errors);
-    const created = await inventoryRepository.create(req.body);
-    res.status(201).json(created);
+    const created = await inventoryRepository.create(toInventoryInput(req.body));
+    res.status(201).json(toInventoryResponse(created));
   } catch (err) {
     next(err);
   }
@@ -30,7 +32,7 @@ async function list(req, res, next) {
     } else {
       rows = await inventoryRepository.listAll();
     }
-    res.status(200).json(rows);
+    res.status(200).json(rows.map(toInventoryResponse));
   } catch (err) {
     next(err);
   }
@@ -38,30 +40,31 @@ async function list(req, res, next) {
 
 async function get(req, res, next) {
   try {
-    const row = await inventoryRepository.findByProductAndWarehouse(req.params.ProductId, req.params.WarehouseId);
-    if (!row) throw new InventoryNotFoundError(req.params.ProductId, req.params.WarehouseId);
-    res.status(200).json(row);
+    const row = await inventoryRepository.findByProductAndWarehouse(req.params.productId, req.params.warehouseId);
+    if (!row) throw new InventoryNotFoundError(req.params.productId, req.params.warehouseId);
+    res.status(200).json(toInventoryResponse(row));
   } catch (err) {
     next(err);
   }
 }
 
-// FR-INV-03: update touches only AvailableQuantity/EarliestDispatchDate.
+// FR-INV-03: update touches only availableQuantity/earliestDispatchDate.
 async function update(req, res, next) {
   try {
     const { errors } = validateInventoryUpdate(req.body);
     if (errors.length > 0) throw new ValidationError(errors);
 
-    const existing = await inventoryRepository.findByProductAndWarehouse(req.params.ProductId, req.params.WarehouseId);
-    if (!existing) throw new InventoryNotFoundError(req.params.ProductId, req.params.WarehouseId);
+    const existing = await inventoryRepository.findByProductAndWarehouse(req.params.productId, req.params.warehouseId);
+    if (!existing) throw new InventoryNotFoundError(req.params.productId, req.params.warehouseId);
 
-    await inventoryRepository.update(req.params.ProductId, req.params.WarehouseId, req.body);
-    res.status(200).json({
-      ProductId: req.params.ProductId,
-      WarehouseId: req.params.WarehouseId,
-      AvailableQuantity: req.body.AvailableQuantity,
-      EarliestDispatchDate: req.body.EarliestDispatchDate,
-    });
+    const changes = {
+      AvailableQuantity: req.body.availableQuantity,
+      EarliestDispatchDate: req.body.earliestDispatchDate,
+    };
+    await inventoryRepository.update(req.params.productId, req.params.warehouseId, changes);
+    res.status(200).json(
+      toInventoryResponse({ ProductId: req.params.productId, WarehouseId: req.params.warehouseId, ...changes })
+    );
   } catch (err) {
     next(err);
   }

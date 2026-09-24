@@ -4,6 +4,8 @@ const { submitOrder, getOrder } = require('../controllers/orderController');
 const router = express.Router();
 
 router.post('/orders', submitOrder);
-router.get('/orders/:OrderId', getOrder);
+// CHANGE1 requirement 1: path parameter names are lowerCamelCase too. The
+// URL shape is unchanged (the segment is positional) — only req.params' key.
+router.get('/orders/:orderId', getOrder);
 
 module.exports = router;

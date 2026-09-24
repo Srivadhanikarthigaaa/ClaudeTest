@@ -4,14 +4,15 @@ const validateFields = require('./validateFields');
 
 const ELIGIBILITY_STATUS_RULES = [required, isType('string'), isOneOf(['Eligible', 'CreditHold', 'Unknown'])];
 
+// CHANGE1 requirement 1: keys are the lowerCamelCase wire field names.
 const CUSTOMER_CREATE_SCHEMA = {
-  CustomerId: [required, isType('string')],
-  EligibilityStatus: ELIGIBILITY_STATUS_RULES,
+  customerId: [required, isType('string')],
+  eligibilityStatus: ELIGIBILITY_STATUS_RULES,
 };
 
-// FR-CUST-03: update touches only EligibilityStatus (CustomerId comes from the path).
+// FR-CUST-03: update touches only eligibilityStatus (customerId comes from the path).
 const CUSTOMER_UPDATE_SCHEMA = {
-  EligibilityStatus: ELIGIBILITY_STATUS_RULES,
+  eligibilityStatus: ELIGIBILITY_STATUS_RULES,
 };
 
 function validateCustomerCreate(payload) {
