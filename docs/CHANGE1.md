@@ -256,6 +256,28 @@ Every Stage 1 suite was kept and re-run under the renamed fields:
   rejected). This is the one Stage 1 assertion CHANGE1 deliberately
   invalidates, and it is called out rather than quietly deleted.
 
+### One pre-existing Stage 1 test defect, found and fixed
+
+`tests/repositories/inventoryRepository.test.js` has a case asserting that
+seeded `PROD001` holds exactly 20 units in each of `WH-A`, `WH-B`, `WH-C`.
+**This was already failing against the live database before CHANGE1** — it is
+not a regression this change introduced, and the file was untouched by the
+rename (`git diff 8155253 HEAD -- backend/tests/repositories/inventoryRepository.test.js`
+is empty).
+
+The cause: `PROD001` is shared, live inventory, and every released order
+against it permanently decrements a row. Stage 1's own manual live
+verification did exactly that — `ORD-LIVE-001` (5 units) and `ORD-UI-TEST-001`
+(3 units) are both still in `dbo.[Order]`, and together they took `WH-A` from
+20 to 12. The assertion was pinned to a value that Stage 1 itself had already
+consumed, and would have kept drifting with every future live run.
+
+The test now asserts what its name says — that `findAllByProduct()` returns a
+row for each of the three warehouses — and leaves exact quantities to the
+suites that own their own `TESTPROD-*` rows and can control them. The intent
+of the test is preserved; only the brittle coupling to mutable shared state is
+removed. Flagged here rather than quietly rewritten.
+
 Run them with:
 
 ```bash
