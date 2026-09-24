@@ -1,5 +1,8 @@
 # Order Fulfilment Application
 
+**Picking this up in a new session? Read [CONTINUATION.md](CONTINUATION.md) first** —
+it has the current build status, environment quirks, and decisions already made.
+
 A three-tier app (React frontend, Node.js/Express backend, SQL Server database)
 that decides whether a customer's order can be released from a single warehouse,
 per the [Functional Requirements Document](docs/Functional%20Requirements%20Document.txt) (FRD).
