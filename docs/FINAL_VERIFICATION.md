@@ -1,5 +1,15 @@
 # Final Verification Checklist
 
+> **Scope: Stage 1 (phases 0-11) only.** This checklist predates CHANGE1 and
+> was not re-derived for it, so the field names, status literals and
+> single-warehouse fulfilment behaviour it verifies are Stage 1's. CHANGE1's
+> own verification — the renamed lowerCamelCase contract, the
+> `"Partially Released"` literal, Priority multi-warehouse fulfilment, the
+> `Backorder` table, and the Stage 1 regression evidence — is in
+> [CHANGE1.md](CHANGE1.md) § 5. The two documents are complementary; nothing
+> below was invalidated by CHANGE1 except the field *spellings* and the
+> single-warehouse rule's applicability to `Priority` customers.
+
 The Phase 11-13 instructions ask for a walkthrough of "FRD Section 66's final
 verification checklist." The FRD file this project was built against
 ([docs/Functional Requirements Document.txt](Functional%20Requirements%20Document.txt))
