@@ -1,0 +1,473 @@
+Functional Requirements Document
+Order Fulfilment Application
+Version 2.0 — Baseline for Implementation
+Table of Contents
+
+Document Control
+Field	Value
+Document Title	Functional Requirements Document (FRD) — Order Fulfilment Application
+Version	2.0
+Status	Baseline specification for implementation — a small number of residual clarification points remain (Section 30)
+Supersedes	Version 1.0 (draft, business-context-only)
+Scope Basis	Business context (v1.0) plus the detailed technical/implementation specification supplied by the implementation stakeholder
+What changed from v1.0: Version 1.0 was written from the business context alone and left many implementation decisions as open questions (eligibility values, warehouse priority, allocation rules, exact status/reason literals, API shape, etc.). This version incorporates the detailed implementation specification subsequently provided, which answers almost all of those questions with exact, literal values. Section 30 now contains only the handful of points that remain genuinely unspecified even in the detailed spec. Anything not explicitly stated in either source is still not invented; it is flagged the same way as in v1.0 — as an [OPEN QUESTION] or a clearly labeled [ASSUMPTION] — never silently decided.
+A note on shared credentials: The implementation specification included a literal .env file containing real-looking database and JWT secrets. This document does not reproduce those literal secret values (they are shown as placeholders below) and recommends they be rotated, since they were transmitted in plain text outside a secrets manager. This is a security-hygiene observation, not a requirement drawn from business scope.
+________________________________________
+1. Business Problem
+The Company fulfils customer orders from inventory held across three warehouses (WH-A, WH-B, WH-C). Determining whether an order can be released — i.e., whether the customer is eligible, whether a single warehouse holds sufficient stock, and whether that warehouse can meet the promised delivery date — must be governed by a single, deterministic, auditable, system-driven process, with the outcome persisted and retrievable by Order ID, and with duplicate submissions of the same order never causing duplicate inventory allocation.
+2. Business Objectives
+1.	Maintain authoritative, persisted records of Customers, Inventory (by product and warehouse), and Orders, using the exact field names in Section 3.
+2.	Automatically validate, at order submission, whether the customer is eligible to transact (EligibilityStatus = Eligible).
+3.	Automatically determine whether a single warehouse (WH-A, WH-B, or WH-C) can supply the full requested quantity — inventory from multiple warehouses must never be combined to satisfy one order.
+4.	Automatically determine whether the selected warehouse’s EarliestDispatchDate meets the order’s PromisedDeliveryDate.
+5.	Where fulfillable: release the order (Status = Released), select the warehouse using the fixed priority WH-A → WH-B → WH-C, and persist the resulting inventory allocation.
+6.	Where not fulfillable: mark the order Blocked with a persisted, deterministic reason.
+7.	Persist the order and its fulfilment result durably, and guarantee that resubmitting an already-completed OrderId is idempotent — it must return the existing result and must never create a duplicate allocation or double-deduct inventory.
+8.	Provide a retrieval capability (GET /orders/{OrderId}) to fetch the current fulfilment result of an order by OrderId.
+9.	Provide automated tests covering the twelve scenarios enumerated in Section 29.
+10.	Centralize all fulfilment decision logic in the backend; the frontend must display, never recompute, the fulfilment result.
+Explicitly out of scope (per the implementation specification): payments, shipping management, notifications, analytics, reporting/dashboards beyond what is required here, product master-data management, and user management beyond the minimum authentication/authorization needed to run this application.
+3. Application Overview
+The Order Fulfilment Application is a three-tier system:
+Frontend (React)
+      ↓  REST API (JSON, JWT-authenticated)
+Backend (Node.js) — routes → controllers → services → repositories
+      ↓
+Database (Microsoft SQL Server — M08935_OrderFulfilment)
+It maintains Customer, Inventory, and Order data; runs a single-warehouse Fulfilment Decision Engine synchronously on order submission; and persists the order, its fulfilment result, and (if released) its inventory allocation as one atomic, idempotent operation.
+3.1 High-Level Fulfilment Flow
+1. Receive order (OrderId, CustomerId, CustomerType, ProductId, Quantity, PromisedDeliveryDate)
+2. Validate request (field presence, types, formats, enumerations) — invalid → 400, nothing persisted
+3. Idempotency check — OrderId already has a completed fulfilment result? → return that result unchanged
+4. Load Customer by CustomerId — EligibilityStatus != Eligible → Status = Blocked, Reason = "blocked-credit", Allocations = []
+5. Load Inventory for ProductId across WH-A, WH-B, WH-C
+6. For each warehouse in priority order WH-A, WH-B, WH-C:
+     if AvailableQuantity >= Quantity AND EarliestDispatchDate <= PromisedDeliveryDate:
+         select this warehouse; stop checking further warehouses
+7. If a warehouse was selected:
+     Status = Released, ReleasedQuantity = Quantity, BackorderedQuantity = 0
+     Allocations = [ { WarehouseId, AllocatedQuantity = Quantity } ]
+     Persist order + fulfilment result + allocation + inventory update — one transaction
+   Else:
+     Status = Blocked, Reason = <deterministic reason — see Section 11>, Allocations = []
+     Persist order + fulfilment result — no allocation created
+8. Return the fulfilment result
+9. GET /orders/{OrderId} returns the same persisted result on any later request
+________________________________________
+4–8. (Consolidated) Functional Requirements — Module Template
+Per the requested structure, every major module in Section 9 is documented using this fixed template: Module name, Objective, Actors, Preconditions, Main workflow, Functional requirements, Validation rules, Business rules, Success conditions, Failure/error conditions.
+________________________________________
+9. Application Modules
+9.1 Module: Customer Management
+Objective: Maintain the authoritative Customer record consumed by the Fulfilment Decision Engine’s eligibility check.
+Actors: Authenticated user (Section 11); Fulfilment Decision Engine (system actor, read-only).
+Preconditions: Actor holds a valid JWT.
+Main workflow:
+1.	Actor creates, views, or updates a Customer record via the React Customer Management screen.
+2.	Backend validates the record.
+3.	Backend persists the change.
+4.	Fulfilment Decision Engine reads EligibilityStatus at order-evaluation time.
+Functional requirements:
+•	FR-CUST-01: The system shall allow creation of a Customer record with CustomerId and EligibilityStatus.
+•	FR-CUST-02: The system shall allow retrieval of a Customer record by CustomerId, and listing of all Customer records.
+•	FR-CUST-03: The system shall allow update of a Customer’s EligibilityStatus.
+•	FR-CUST-04 [OPEN QUESTION — Section 30, item 4]: Customer deletion/deactivation is not specified in either source document; the frontend requirements list View/Create/Update only. No delete capability is included unless confirmed.
+Validation rules:
+•	CustomerId — required, string, unique.
+•	EligibilityStatus — required, must be exactly one of Eligible, CreditHold, Unknown (case-sensitive; no other values permitted).
+Business rules: Only the three literal values above are valid. No other eligibility value may be stored or accepted.
+Success conditions: Record created/updated/retrieved; visible to subsequent Fulfilment Decision Engine evaluations.
+Failure/error conditions: Duplicate CustomerId on create (409); CustomerId not found on read/update (404); EligibilityStatus not one of the three literal values (400).
+9.2 Module: Inventory Management
+Objective: Maintain per-warehouse product availability consumed by the Fulfilment Decision Engine’s availability and dispatch-date checks.
+Actors: Authenticated user; Fulfilment Decision Engine (system actor — reads, and on release, decrements AvailableQuantity).
+Preconditions: Actor holds a valid JWT.
+Main workflow:
+1.	Actor creates or updates an Inventory record for a ProductId + WarehouseId combination via the React Inventory Management screen.
+2.	Backend validates the record.
+3.	Backend persists the change.
+4.	Fulfilment Decision Engine reads AvailableQuantity and EarliestDispatchDate per ProductId across WH-A, WH-B, WH-C; on release, decrements the selected warehouse’s AvailableQuantity by the allocated quantity within the same transaction that marks the order Released.
+Functional requirements:
+•	FR-INV-01: The system shall allow creation of an Inventory record identified by ProductId + WarehouseId, carrying AvailableQuantity and EarliestDispatchDate.
+•	FR-INV-02: The system shall allow retrieval of Inventory records by ProductId, by WarehouseId, or by the combination, and viewing by warehouse/product per the frontend requirement.
+•	FR-INV-03: The system shall allow update of AvailableQuantity and EarliestDispatchDate for an existing record.
+•	FR-INV-04: On order release, the system shall decrement AvailableQuantity of the single selected warehouse only by exactly the allocated quantity, as part of the same atomic operation that persists the fulfilment result (Section 27, Section 56).
+•	FR-INV-05: The system shall prevent an allocation from exceeding the available inventory recorded at commit time, including under concurrent requests (Section 57).
+Validation rules:
+•	ProductId — required, string.
+•	WarehouseId — required, must be exactly one of WH-A, WH-B, WH-C. No other warehouse values permitted.
+•	AvailableQuantity — required, integer > 0 when creating/maintaining inventory data.
+•	EarliestDispatchDate — required, valid date in YYYY-MM-DD format.
+•	(ProductId, WarehouseId) — unique combination.
+Business rules: Availability is evaluated per warehouse individually, never summed across warehouses (Section 18). Warehouse identity is restricted to the three literal values; no additional warehouses may be introduced.
+Success conditions: Inventory record created/updated/retrieved; Fulfilment Decision Engine’s read reflects the latest committed state.
+Failure/error conditions: Duplicate ProductId + WarehouseId on create (409); record not found on update (404); WarehouseId not one of the three literal values (400); non-positive AvailableQuantity (400); malformed date (400).
+9.3 Module: Order Submission and Fulfilment
+Objective: Capture an order and synchronously produce a deterministic, persisted, idempotent fulfilment result.
+Actors: Authenticated user (order submitter); Fulfilment Decision Engine (system actor).
+Preconditions: Actor holds a valid JWT.
+Main workflow:
+1.	Actor submits POST /orders with OrderId, CustomerId, CustomerType, ProductId, Quantity, PromisedDeliveryDate.
+2.	Backend validates the request (Section 15).
+3.	Backend checks whether OrderId already has a persisted fulfilment result; if so, returns it unchanged (Section 16, Section 29 Test 11) without re-evaluating.
+4.	Otherwise, backend runs the Fulfilment Decision Engine (Module 9.4).
+5.	Backend persists the order and fulfilment result (and allocation, if released) atomically.
+6.	Backend returns the fulfilment result in the exact response shape (Section 22).
+7.	Actor or any authenticated caller retrieves the same result later via GET /orders/{OrderId} (Module 9.5).
+Functional requirements:
+•	FR-ORD-01: The system shall accept order submission with exactly the fields OrderId, CustomerId, CustomerType, ProductId, Quantity, PromisedDeliveryDate — all mandatory.
+•	FR-ORD-02: The system shall validate the request before any fulfilment evaluation (Section 15).
+•	FR-ORD-03: The system shall treat OrderId as an idempotency key: a second submission of an OrderId that already has a persisted fulfilment result must return that same result without creating a second allocation, without deducting inventory again, and without creating a duplicate fulfilment record.
+•	FR-ORD-04: The system shall trigger the Fulfilment Decision Engine synchronously and exactly once per new OrderId.
+•	FR-ORD-05: The system shall persist the order and its fulfilment result as a single durable, consistent record (Section 56).
+Validation rules: See Section 15.
+Business rules:
+•	CustomerType is persisted (Standard or Priority) but drives no differentiated fulfilment behavior — both types follow identical rules (Section 21). This is an explicit business rule, not an omission.
+•	A single order can be satisfied by at most one warehouse; partial or combined-warehouse fulfilment is explicitly disallowed (Section 18, Section 27).
+Success conditions: Order reaches Released or Blocked with a persisted, retrievable, idempotent result.
+Failure/error conditions: Missing/invalid field (400); CustomerId not found — [OPEN QUESTION — Section 30, item 1]: neither source document states the exact response/reason when the referenced CustomerId itself does not exist (as opposed to existing with CreditHold/Unknown); duplicate-key or concurrency conflict (409); unhandled system error (500, not persisted as Blocked — Section 28).
+9.4 Module: Fulfilment Decision Engine
+Objective: Given a validated, non-duplicate order, deterministically decide Released or Blocked, select the fulfilling warehouse under the fixed priority rule, and compute the exact response fields.
+Actors: System actor, invoked synchronously by Module 9.3.
+Preconditions: Order has passed structural validation; OrderId is not already completed.
+Main workflow (exact order, per the implementation specification):
+1.	Load the order.
+2.	Check idempotency (already handled in Module 9.3 before this engine runs).
+3.	Load the customer by CustomerId.
+4.	Check eligibility: EligibilityStatus must equal Eligible; CreditHold and Unknown both block with Reason = "blocked-credit".
+5.	Load inventory for ProductId across WH-A, WH-B, WH-C.
+6.	Evaluate warehouse eligibility: a warehouse qualifies only if AvailableQuantity >= Quantity and EarliestDispatchDate <= PromisedDeliveryDate.
+7.	Apply warehouse priority WH-A → WH-B → WH-C: select the first qualifying warehouse in that order; this priority is the tie-breaker even when multiple warehouses qualify identically.
+8.	If a warehouse qualifies: mark Released, create exactly one allocation record for the full Quantity, decrement that warehouse’s AvailableQuantity.
+9.	If no warehouse qualifies: mark Blocked with a deterministic reason; create no allocation.
+10.	Persist the order, fulfilment result, and (if released) allocation and inventory decrement as one atomic operation.
+Functional requirements:
+•	FR-FDE-01: The engine shall evaluate CustomerId eligibility before evaluating inventory (fixed order, per Section 15’s Step 4 vs. Step 5 ordering).
+•	FR-FDE-02: The engine shall never combine AvailableQuantity across warehouses to satisfy one order (Section 18) — each warehouse is evaluated independently against the full requested Quantity.
+•	FR-FDE-03: The engine shall select a qualifying warehouse strictly by the fixed priority WH-A, then WH-B, then WH-C, stopping at the first warehouse that satisfies both the quantity and date conditions (Section 20).
+•	FR-FDE-04: The engine shall not use CustomerType to alter warehouse selection, priority, or any other fulfilment outcome (Section 21).
+•	FR-FDE-05: When released, ReleasedQuantity shall equal the order’s Quantity exactly, and BackorderedQuantity shall equal 0; when blocked, ReleasedQuantity = 0 and BackorderedQuantity = 0 (no partial-release computation exists under the current rules — Section 26).
+•	FR-FDE-06: Reason shall be null when Status = Released, and a non-null, deterministic value when Status = Blocked (Section 11, Section 38).
+•	FR-FDE-07: The evaluation, persistence of the order, fulfilment result, allocation (if any), and inventory decrement (if any) shall occur as a single atomic transaction (Section 56).
+Validation rules: As above; input-format validation is in Section 15.
+Business rules:
+•	Eligibility reason: both CreditHold and Unknown map to the single literal reason "blocked-credit" (Section 11) — confirmed, exact value, no other eligibility-driven reason value is defined.
+•	Inventory/date-failure reason: the implementation specification requires “meaningful deterministic reason values” and “stable reason codes that can be tested consistently,” but does not give the literal string(s) to use — [OPEN QUESTION — Section 30, item 2]. This document proposes, as a labeled default pending confirmation: "blocked-insufficient-inventory" when no warehouse has enough quantity, and "blocked-delivery-date" when at least one warehouse has enough quantity but none can meet the date. These proposed literals are not confirmed business values and must not be treated as such until approved.
+•	PartiallyReleased remains a valid, storable status literal, but no current business rule produces it (Section 26); it must not be generated by any code path unless a future, explicit partial-release rule is added.
+Success conditions: Order reaches a terminal, persisted, idempotent fulfilment result matching the exact response contract (Section 22).
+Failure/error conditions: CustomerId not found (Section 30, item 1); ProductId has no inventory records at all across any warehouse — [OPEN QUESTION — Section 30, item 3]: not explicitly addressed; this document treats it as equivalent to “no warehouse qualifies” → Blocked with the insufficient-inventory reason, pending confirmation; unhandled system error (Section 28).
+9.5 Module: Fulfilment Result Retrieval
+Objective: Retrieve the current persisted fulfilment result for an OrderId.
+Actors: Authenticated user or system integration.
+Preconditions: Actor holds a valid JWT.
+Main workflow:
+1.	Actor calls GET /orders/{OrderId}.
+2.	Backend retrieves the persisted order, status, and (if released) allocation, or (if blocked) reason.
+3.	Backend returns the result in the exact response shape (Section 22); if not found, returns 404 with the exact error shape (Section 34).
+Functional requirements:
+•	FR-RET-01: The system shall return the exact fields OrderId, Status, Reason, ReleasedQuantity, BackorderedQuantity, Allocations for an existing order.
+•	FR-RET-02: The system shall return HTTP 404 with body { "OrderId": "<id>", "Error": "No order found" } for a non-existent OrderId (Section 34) — exact shape, no additional fields.
+Validation rules: OrderId path parameter must be supplied.
+Business rules: The result returned must exactly match the last persisted fulfilment outcome; retrieval never re-triggers evaluation.
+Success conditions: Correct, current, exact-shape result returned.
+Failure/error conditions: OrderId not found → 404 exact shape above.
+________________________________________
+10. Detailed User Workflows
+10.1 Workflow: Submit an Order
+1.	User fills the order form (OrderId, CustomerId, CustomerType, ProductId, Quantity, PromisedDeliveryDate) in the React UI; all fields mandatory; client-side validates CustomerType ∈ {Standard, Priority}, Quantity > 0, date format YYYY-MM-DD — but this is a UX convenience only, never a substitute for backend validation (Section 59).
+2.	UI calls POST /orders.
+3.	Backend validates, checks idempotency, runs the Fulfilment Decision Engine, persists atomically, and returns the result.
+4.	UI displays the result per Section 53 (Released → warehouse + allocated quantity; Blocked → reason only, no allocation shown).
+10.2 Workflow: Retrieve Fulfilment Result
+1.	User (or system) requests GET /orders/{OrderId}.
+2.	Backend returns the persisted result, or 404 if not found.
+10.3 Workflow: Resubmit an Already-Completed Order (Idempotency)
+1.	User submits POST /orders with an OrderId that already has a persisted fulfilment result.
+2.	Backend detects the existing result and returns it unchanged — no re-evaluation, no new allocation, no inventory deduction, no duplicate record (Section 16, Section 29 Test 11). [ASSUMPTION — Section 30, item 5]: this idempotency behavior is assumed to apply regardless of whether the existing result is Released or Blocked, since the specification defines “already completed” without restricting it to Released outcomes only.
+10.4 Workflow: Maintain Customer / Inventory Master Data
+1.	Authenticated user creates/updates a Customer or Inventory record via the respective React screen.
+2.	Change is validated and persisted; it affects only subsequent order evaluations, never retroactively re-evaluating already-completed orders (consistent with the idempotency rule).
+________________________________________
+11. Authentication and Authorization
+The implementation specification confirms JWT-based authentication (JWT_SECRET, JWT_EXPIRES_IN=8h) and explicitly limits scope to “the minimum authentication/authorization structure needed by the application” — no user-management module and no differentiated roles are specified.
+Functional requirements:
+•	FR-AUTH-01: All API endpoints (Customer, Inventory, Order) shall require a valid JWT bearer token; requests without one are rejected with 401.
+•	FR-AUTH-02: Token validation shall use the configured JWT_SECRET and shall reject expired or malformed tokens.
+•	FR-AUTH-03 [OPEN QUESTION — Section 30, item 6]: No login/token-issuance endpoint, user store, or role model is specified. It is unclear how a JWT is obtained in the first place (there is no signup/login requirement anywhere in either source document) and whether all authenticated users have identical permissions or whether, e.g., only some users may edit Customer/Inventory data. This document does not invent a role model; a minimal single-role authenticated-user model is assumed only as a placeholder pending confirmation.
+Business rules: None beyond “must be authenticated” — no role-based differentiation is specified or assumed beyond the placeholder above.
+Success/failure conditions: Valid token → request proceeds; missing/invalid/expired token → 401.
+________________________________________
+12. Dashboard Requirements
+Neither source document requests a dashboard, and the implementation specification explicitly excludes “reporting dashboards beyond what is required” and “analytics.” No dashboard module is included. The only status-visibility requirement is the per-order fulfilment result display described in Section 53.
+________________________________________
+13. CRUD Requirements
+Entity	Create	Read	Update	Delete
+Customer	Yes	Yes	Yes	Not specified — Section 30, item 4
+Inventory	Yes	Yes	Yes	Not specified — Section 30, item 4
+Order	Yes (via POST /orders, always triggers evaluation, idempotent on repeat)	Yes (GET /orders/{OrderId})	No (orders are never updated after creation; resubmission is idempotent replay, not an update)	No
+Fulfilment Result	System-generated only	Yes (embedded in Order retrieval)	No (immutable once persisted)	No
+Inventory Allocation	System-generated only (result of Release)	Yes (embedded in Order retrieval)	No (immutable)	No
+Functional requirements:
+•	FR-CRUD-01: Create/Read/Update on Customer and Inventory shall perform full validation (Section 15) before persisting.
+•	FR-CRUD-02: Order creation always triggers the Fulfilment Decision Engine on first submission; a repeat submission of a completed OrderId is a read-through of the existing result, not a new evaluation.
+•	FR-CRUD-03: Fulfilment Result and Inventory Allocation records are never directly created, updated, or deleted by a user action; they exist only as system-generated consequences of order evaluation.
+________________________________________
+14. Search / Filter / Sort Requirements
+The implementation specification’s frontend section requires “View customers,” “View inventory,” “View inventory by warehouse/product,” but does not specify a generic multi-field search/filter/sort API contract the way the earlier business-context draft anticipated. The following is the minimum needed to satisfy the stated frontend views; anything beyond this is not specified and is not added.
+Functional requirements:
+•	FR-SRCH-01: The Inventory list view shall be filterable by WarehouseId and by ProductId (per “View inventory by warehouse/product”).
+•	FR-SRCH-02: The Customer list view shall display CustomerId and EligibilityStatus for all customers.
+•	FR-SRCH-03 [OPEN QUESTION — Section 30, item 7]: Whether an Order list/search view (e.g., by status, by customer) is required is not stated; the specification only defines single-order retrieval by OrderId. No order-listing endpoint is included unless confirmed.
+________________________________________
+15. Form Validation Requirements
+15.1 Order Submission (POST /orders) — exact rules from the specification
+Field	Type	Rule
+OrderId	string	Required
+CustomerId	string	Required
+CustomerType	string	Required; must be exactly Standard or Priority (case-sensitive; no other value)
+ProductId	string	Required
+Quantity	integer	Required; must be > 0 (zero and negative rejected)
+PromisedDeliveryDate	string	Required; must match YYYY-MM-DD exactly; no other date format accepted
+[OPEN QUESTION — Section 30, item 8]: Whether PromisedDeliveryDate may be a past date is not addressed by either source document (only the format is specified, not a temporal lower bound). No past-date rejection is implemented unless confirmed.
+15.2 Customer
+Field	Type	Rule
+CustomerId	string	Required, unique
+EligibilityStatus	string	Required; exactly one of Eligible, CreditHold, Unknown
+15.3 Inventory
+Field	Type	Rule
+ProductId	string	Required
+WarehouseId	string	Required; exactly one of WH-A, WH-B, WH-C
+AvailableQuantity	integer	Required; > 0 when maintaining source data
+EarliestDispatchDate	string	Required; YYYY-MM-DD format
+Functional requirements:
+•	FR-VAL-01: All required fields shall be validated for presence before any fulfilment evaluation.
+•	FR-VAL-02: CustomerType and WarehouseId and EligibilityStatus shall be validated against their exact literal enumerations; any other value is a 400 validation error.
+•	FR-VAL-03: Dates shall be validated as well-formed YYYY-MM-DD; ambiguous formats (DD-MM-YYYY, MM-DD-YYYY) are rejected.
+•	FR-VAL-04: Quantity and AvailableQuantity shall be validated as integers greater than zero.
+•	FR-VAL-05: Validation must occur server-side regardless of client-side validation (Section 59); an invalid request returns 400 and nothing is persisted.
+________________________________________
+16. Data Entities
+16.1 Entity: Customer
+•	Purpose: Authoritative record of a customer’s eligibility for order fulfilment.
+•	Fields:
+Field	Data Type	Required	Notes
+CustomerId	String	Yes (Primary Key)	Unique identifier, e.g. CUST001
+EligibilityStatus	String (enum)	Yes	Exactly one of Eligible, CreditHold, Unknown
+•	Primary Key: CustomerId
+•	Foreign Keys: None
+•	Relationships: One Customer → many Orders (1:N)
+16.2 Entity: Inventory
+•	Purpose: Per-warehouse available quantity and earliest dispatch date for a product.
+•	Fields:
+Field	Data Type	Required	Notes
+ProductId	String	Yes (part of composite PK)	e.g. PROD001
+WarehouseId	String (enum)	Yes (part of composite PK)	Exactly one of WH-A, WH-B, WH-C
+AvailableQuantity	Integer	Yes	> 0 when maintained
+EarliestDispatchDate	Date	Yes	YYYY-MM-DD
+•	Primary Key: Composite (ProductId, WarehouseId)
+•	Foreign Keys: None (no separate Product or Warehouse master entity is specified; WarehouseId is constrained by enumeration only)
+•	Relationships: One (ProductId) → many Inventory rows (one per warehouse); one Inventory row → many InventoryAllocation rows over time (never concurrently over-allocated — Section 57)
+16.3 Entity: Order
+•	Purpose: A customer’s request for a product quantity by a promised delivery date.
+•	Fields:
+Field	Data Type	Required	Notes
+OrderId	String	Yes (Primary Key)	e.g. ORD1001
+CustomerId	String	Yes (Foreign Key → Customer)	
+CustomerType	String (enum)	Yes	Exactly Standard or Priority; no differentiated fulfilment behavior
+ProductId	String	Yes	References Inventory by ProductId across all warehouses
+Quantity	Integer	Yes	> 0
+PromisedDeliveryDate	Date	Yes	YYYY-MM-DD
+•	Primary Key: OrderId
+•	Foreign Keys: CustomerId → Customer.CustomerId
+•	Relationships: One Customer → many Orders (1:N); one Order → exactly one FulfilmentResult (1:1); one Order → zero or one InventoryAllocation (1:0..1 — never more than one, since only one warehouse may ever be selected)
+16.4 Entity: FulfilmentResult
+•	Purpose: The persisted, idempotent outcome of evaluating an order — required so that GET /orders/{OrderId} and duplicate-submission handling can read back an exact prior result without re-running the engine.
+•	Fields:
+Field	Data Type	Required	Notes
+OrderId	String	Yes (Primary Key, Foreign Key → Order)	
+Status	String (enum)	Yes	Exactly one of Released, PartiallyReleased, Blocked (only Released/Blocked are currently ever produced — Section 26)
+Reason	String (nullable)	Conditional	null when Released; a deterministic non-null value when Blocked ("blocked-credit" confirmed; inventory/date reasons proposed pending confirmation — Section 30, item 2)
+ReleasedQuantity	Integer	Yes	Equals Order.Quantity if Released, else 0
+BackorderedQuantity	Integer	Yes	Always 0 under current rules (Section 26)
+•	Primary Key: OrderId
+•	Foreign Keys: OrderId → Order.OrderId
+•	Relationships: One Order → one FulfilmentResult (1:1)
+16.5 Entity: InventoryAllocation
+•	Purpose: Records the exact warehouse and quantity used to satisfy a Released order.
+•	Fields:
+Field	Data Type	Required	Notes
+AllocationId	String/Identifier	Yes (Primary Key)	System-generated
+OrderId	String	Yes (Foreign Key → Order / FulfilmentResult)	
+WarehouseId	String (enum)	Yes	The single selected warehouse
+AllocatedQuantity	Integer	Yes	Always equals Order.Quantity (no split, no partial — Section 27)
+•	Primary Key: AllocationId
+•	Foreign Keys: OrderId → Order.OrderId; (ProductId, WarehouseId) → Inventory.(ProductId, WarehouseId) (via the parent Order’s ProductId)
+•	Relationships: One Order → at most one Allocation (Section 16.3); one Inventory row → many Allocation rows over time
+________________________________________
+17–20. (Reserved)
+Entity details are consolidated into Section 16 (five entities), consistent with v1.0’s approach, since splitting a five-entity model across four additional numbered headings would not add clarity.
+________________________________________
+21. Database Relationships
+Customer (1) ──────< (N) Order (1) ────── (1) FulfilmentResult
+                          │
+                          │ (0..1)
+                          ▼
+                  InventoryAllocation (N) >────── (1) Inventory
+                                                    [keyed by ProductId + WarehouseId]
+Relationship	Cardinality	Notes
+Customer → Order	1:N	Every order has exactly one customer
+Order → FulfilmentResult	1:1	Every order has exactly one persisted result (created on first submission, read-through thereafter)
+Order → InventoryAllocation	1:0..1	Zero if Blocked; exactly one if Released (never more than one — no split allocation)
+Inventory (ProductId, WarehouseId) → InventoryAllocation	1:N	One inventory row may be drawn on by many allocations over time, but never allocated below zero (Section 57)
+________________________________________
+22. REST API Requirements
+All endpoints require a valid JWT bearer token (Section 11) unless noted.
+22.1 POST /orders
+•	Method: POST
+•	Endpoint: /orders
+•	Purpose: Submit (or idempotently re-fetch) the fulfilment result for an order.
+•	Request:
+{
+  "OrderId": "ORD1001",
+  "CustomerId": "CUST001",
+  "CustomerType": "Standard",
+  "ProductId": "PROD001",
+  "Quantity": 60,
+  "PromisedDeliveryDate": "2026-09-25"
+}
+•	Response — Released (201 or 200; see Section 30, item 9 on which status code applies to a first-time vs. idempotent-replay submission):
+{
+  "OrderId": "ORD1001",
+  "Status": "Released",
+  "Reason": null,
+  "ReleasedQuantity": 60,
+  "BackorderedQuantity": 0,
+  "Allocations": [
+    { "WarehouseId": "WH-B", "AllocatedQuantity": 60 }
+  ]
+}
+•	Response — Blocked:
+{
+  "OrderId": "ORD1001",
+  "Status": "Blocked",
+  "Reason": "blocked-credit",
+  "ReleasedQuantity": 0,
+  "BackorderedQuantity": 0,
+  "Allocations": []
+}
+•	Validation: Section 15.1 — all fields required and type/format/enum-checked before evaluation.
+•	Error responses: 400 (validation failure — nothing persisted); 401 (missing/invalid token); 404 (CustomerId not found — Section 30, item 1); 409 (e.g., a concurrent request for the same OrderId still being processed); 500 (unhandled error — not persisted as Blocked, Section 28).
+22.2 GET /orders/{OrderId}
+•	Method: GET
+•	Endpoint: /orders/{OrderId}
+•	Purpose: Retrieve the current persisted fulfilment result.
+•	Request: Path parameter OrderId.
+•	Response (200): Same shape as the POST /orders response above.
+•	Validation: OrderId must be supplied.
+•	Error responses: 404 with exact body:
+{ "OrderId": "ORD9999", "Error": "No order found" }
+401 (missing/invalid token).
+22.3 Customer and Inventory endpoints — inferred, not explicitly specified
+The implementation specification requires React screens to “View/Create/Update” Customer and Inventory data, but does not give exact endpoint paths, methods, or JSON shapes for these the way it does for /orders. The following is the minimum REST surface inferred from the stated frontend capability, using the exact field names from Section 3, and is flagged as inferred rather than dictated [OPEN QUESTION — Section 30, item 10]: it should be confirmed against the specification’s intent before being treated as fixed contract.
+Method	Endpoint	Purpose
+POST	/customers	Create a Customer (CustomerId, EligibilityStatus)
+GET	/customers	List all Customers
+GET	/customers/{CustomerId}	Retrieve one Customer
+PUT	/customers/{CustomerId}	Update EligibilityStatus
+POST	/inventory	Create an Inventory row (ProductId, WarehouseId, AvailableQuantity, EarliestDispatchDate)
+GET	/inventory?warehouseId=&productId=	List/filter Inventory by warehouse and/or product
+GET	/inventory/{ProductId}/{WarehouseId}	Retrieve one Inventory row
+PUT	/inventory/{ProductId}/{WarehouseId}	Update AvailableQuantity / EarliestDispatchDate
+Validation and error responses for these mirror Sections 15.2/15.3 and the general error model in Section 28.
+________________________________________
+23. Stored Procedure Requirements
+The specification requires SQL Server and calls for “stored procedures where appropriate,” without mandating that all logic live in stored procedures. The following logic units must be encapsulated transactionally, whether as stored procedures or equivalent application-layer transactions (Section 56):
+•	EvaluateAndPersistOrderFulfilment — given the order fields, performs the idempotency check, eligibility check, per-warehouse availability+date check with WH-A→WH-B→WH-C priority, and — in one transaction — writes the Order, FulfilmentResult, InventoryAllocation (if any), and Inventory decrement (if any). Must use a locking/isolation strategy (Section 57) that prevents two concurrent requests from both allocating the same units.
+•	GetOrderFulfilmentResult — given OrderId, returns the Order joined with its FulfilmentResult and InventoryAllocation (if any), or the exact 404 shape if absent.
+•	GetInventoryByProduct — given ProductId, returns AvailableQuantity and EarliestDispatchDate for WH-A, WH-B, WH-C.
+________________________________________
+24. Frontend Requirements (React)
+•	FR-FE-01: Customer Management screen: view all customers; create a customer (CustomerId, EligibilityStatus); update a customer’s EligibilityStatus; display eligibility status per customer.
+•	FR-FE-02: Inventory Management screen: view inventory; create/update inventory (ProductId, WarehouseId, AvailableQuantity, EarliestDispatchDate); view/filter inventory by warehouse and by product.
+•	FR-FE-03: Order Processing screen: a form with OrderId, CustomerId, CustomerType, ProductId, Quantity, PromisedDeliveryDate — all mandatory; client-side validation of CustomerType ∈ {Standard, Priority}, Quantity > 0, date format YYYY-MM-DD (UX convenience only — Section 59).
+•	FR-FE-04: Fulfilment Result display (Section 53): after submission, show OrderId, Status, Reason, ReleasedQuantity, BackorderedQuantity, Allocations.
+–	Released → show Status: Released, Warehouse: <WarehouseId>, Allocated Quantity: <AllocatedQuantity>.
+–	Blocked → show Status: Blocked, Reason: <Reason>; do not display allocation information for a blocked order.
+•	FR-FE-05: The frontend must consume and display the backend’s fulfilment result exactly as returned; it must never independently compute eligibility, availability, warehouse selection, or delivery-date feasibility (Section 1, critical rule).
+________________________________________
+25. Backend Requirements (Node.js)
+•	FR-BE-01: Layered architecture: routes → controllers → services → repositories/data-access → database, plus validators and middleware, with business logic kept out of route handlers (Section 54).
+•	FR-BE-02: A dedicated Fulfilment Service (Section 55) encapsulates: loading the order, idempotency check, loading the customer, eligibility check, loading inventory, warehouse-eligibility evaluation, priority application, dispatch-date evaluation, allocation creation, fulfilment-result persistence, and returning the final result.
+•	FR-BE-03: All Customer/Inventory/Order validation is enforced server-side regardless of frontend validation (Section 59).
+•	FR-BE-04: Database access uses parameterized queries exclusively; no unsafe string concatenation of user input (Section 60).
+•	FR-BE-05: Database credentials and JWT secret are read from environment configuration, never hardcoded or committed (Section 61); see the note in Document Control about rotating any secret that was shared in plain text.
+•	FR-BE-06: The Released-path transaction (inventory validation → inventory update → allocation creation → fulfilment-result persistence) is atomic; failure at any step rolls back the entire operation (Section 56).
+•	FR-BE-07: Concurrent requests contending for the same warehouse’s inventory must be serialized or locked such that the sum of all allocations against that warehouse never exceeds its AvailableQuantity at any committed point in time (Section 57) — checking quantity before opening a transaction is explicitly insufficient.
+________________________________________
+26. UI/UX Requirements
+•	FR-UX-01: Present the fulfilment outcome immediately and unambiguously upon order submission, using the exact Status/Reason/quantities/Allocations returned by the backend.
+•	FR-UX-02: Present validation errors inline at the field level.
+•	FR-UX-03: Never render allocation details for a Blocked order.
+•	FR-UX-04: Use consistent terminology matching the exact field names in Section 3 throughout the UI (e.g., always “WarehouseId,” never “warehouse code”).
+________________________________________
+27. Security Requirements
+•	FR-SEC-01: All API endpoints require a valid JWT (Section 11); missing/invalid/expired tokens are rejected with 401.
+•	FR-SEC-02: Database credentials, JWT secret, and any other sensitive configuration are supplied via environment variables, never committed to source control; a .env.example with placeholders is provided instead of a real .env (Section 61, Section 64).
+•	FR-SEC-03: The specific secret values transmitted in the implementation specification (the DB password and JWT secret shown in that document) must be treated as compromised — since they were shared in plain text — and should be rotated before or immediately after deployment; this document does not reproduce those literal values.
+•	FR-SEC-04: All SQL access uses parameterized queries; no dynamic SQL built from unsanitized user input (Section 60).
+•	FR-SEC-05: API error responses never expose SQL exceptions, stack traces, connection strings, or credentials (Section 58).
+•	FR-SEC-06: Concurrency control prevents over-allocation of a single warehouse’s inventory under simultaneous requests (Section 57).
+________________________________________
+28. Error Handling
+Scenario	HTTP Status	Persisted as Blocked?
+Missing/invalid request field, bad enum value, bad date format	400	No — request rejected, nothing persisted
+CustomerId not found (Section 30, item 1)	404 (proposed, pending confirmation)	No
+Status = Blocked due to CreditHold/Unknown eligibility, insufficient inventory, or delivery-date failure	200/201 with Status: Blocked body	Yes — this is a business decision, not an error
+OrderId not found on GET /orders/{OrderId}	404, exact body per Section 34	N/A
+Duplicate/concurrent processing conflict	409	No — idempotent replay returns the existing result instead (Section 16)
+Unhandled system/database error during evaluation	500	No — a technical failure is never recorded as a business Blocked decision; the transaction rolls back entirely and the caller should retry
+Missing/invalid/expired JWT	401	N/A
+Key principle (unchanged from v1.0): a business determination (CreditHold/Unknown, insufficient inventory, date infeasible) is always persisted as Blocked with a Reason; a technical failure is never persisted as Blocked — it surfaces as a 5xx and leaves nothing to be idempotently replayed.
+________________________________________
+29. Testing Requirements
+The following twelve scenarios are mandated exactly by the implementation specification and must all be automated:
+#	Scenario	Key Inputs	Expected Result
+1	Eligible + single warehouse	CUST001, PROD001, Qty 20, Date 2026-09-25	Released, WH-A, Allocated 20
+2	Warehouse priority	WH-A and WH-B both qualify	WH-A selected
+3	WH-A cannot, WH-B can	WH-A=20, WH-B=60, WH-C=60, Qty=60	WH-B selected
+4	WH-A and WH-B both can	WH-A=60, WH-B=60, WH-C=60, Qty=60	WH-A selected
+5	No single warehouse can	WH-A=20, WH-B=20, WH-C=20, Qty=60	Blocked, Allocations: [] (no combining)
+6	Credit hold	CUST003 (CreditHold)	Blocked, Reason: "blocked-credit", Allocations: []
+7	Unknown eligibility	CUST002 (Unknown)	Blocked, Reason: "blocked-credit", Allocations: []
+8	Dispatch-date failure	AvailableQuantity sufficient, EarliestDispatchDate > PromisedDeliveryDate	Blocked, Allocations: []
+9	Alternate warehouse by date	WH-A qualifies on qty but fails date; WH-B qualifies on both	WH-B selected
+10	Quantity and date both valid	WH-A=100, dispatch 2026-09-20; Qty=60, Promised=2026-09-25	Released, WH-A, Allocated 60
+11	Duplicate completed order	Submit ORD1001 twice	Second call returns the identical first result; no duplicate allocation; inventory not deducted twice
+12	Unknown order	GET /orders/ORD9999	404, { "OrderId": "ORD9999", "Error": "No order found" }
+Additional required test categories (implied by the specification’s own rules, even though not individually numbered):
+•	Validation-error tests: missing field, CustomerType outside {Standard, Priority}, non-YYYY-MM-DD date, Quantity <= 0.
+•	Concurrency test: two simultaneous requests both requesting the same warehouse’s full available quantity — exactly one must succeed in allocating; the other must not double-allocate the same units (Section 57).
+•	Transactional-consistency test: forcing a failure between allocation creation and fulfilment-result persistence must leave neither record committed (Section 56).
+________________________________________
+30. Clarification Points / Open Questions
+This version resolves nearly all of v1.0’s open questions with exact values from the implementation specification. The following remain genuinely unspecified in both source documents and must be confirmed before implementation is considered final:
+1.	CustomerId not found: What should happen — and what HTTP status/response shape — when an order references a CustomerId that does not exist at all (as distinct from existing with CreditHold/Unknown)? This document proposes 404, pending confirmation. (Sections 9.3, 9.4, 22.1, 28.)
+2.	Literal reason codes for non-eligibility blocks: Only "blocked-credit" is a confirmed literal value. The exact strings for “insufficient inventory” and “cannot meet delivery date” are not given. This document proposes "blocked-insufficient-inventory" and "blocked-delivery-date" as labeled defaults, not confirmed business values. (Sections 9.4, 11, 38.)
+3.	ProductId with no inventory anywhere: Not explicitly addressed; this document treats it as equivalent to “no qualifying warehouse” → Blocked with the insufficient-inventory reason, pending confirmation. (Section 9.4.)
+4.	Delete/deactivation of Customer or Inventory records: Neither source document requests a delete capability (the frontend spec lists only View/Create/Update). No delete endpoint is included unless confirmed. (Sections 9.1, 9.2, 13.)
+5.	Idempotency scope — does it cover Blocked orders too? The specification’s worked example only shows a Released order being resubmitted. This document assumes idempotent replay applies to any OrderId with a persisted result, Released or Blocked, since that is the most literal reading of “already completed OrderId,” but this should be explicitly confirmed. (Sections 9.3, 10.3, 16, 29 Test 11.)
+6.	Authentication issuance and roles: There is no login/token-issuance endpoint, user store, or role model specified anywhere in either source document, even though JWT validation is clearly required. How are tokens obtained, and are all authenticated users permitted to do everything (including Customer/Inventory edits), or is some role distinction needed? (Section 11.)
+7.	Order listing/search: Is a list/search view for Orders required (e.g., by status or customer), or is single-order retrieval by OrderId the entire read surface for Orders? (Section 14.)
+8.	Past-dated PromisedDeliveryDate: Is a PromisedDeliveryDate earlier than the current date/order-submission date permitted, or should it be rejected as a validation error? Only the date format is specified, not a temporal lower bound. (Section 15.1.)
+9.	HTTP status code for POST /orders: Should a first-time successful submission return 201 Created, and should an idempotent replay of an already-completed order return 200 OK instead (to reflect that no new resource was created), or should both cases return the same status code? Not specified. (Section 22.1.)
+10.	Exact Customer/Inventory API contract: The specification requires the corresponding React screens but does not give literal endpoint paths/methods/payloads for Customer and Inventory management the way it does for /orders. Section 22.3’s endpoints are inferred from the frontend requirement, not dictated, and should be confirmed. (Section 22.3.)
+Everything else previously open in v1.0 — eligibility values, warehouse enumeration and priority, split-allocation policy, delivery-date comparison rule, Customer Type’s (lack of) effect, order status literals, and the shape of the fulfilment result — is now fully confirmed by the implementation specification and is treated as a fixed requirement throughout this document, not an assumption.
+________________________________________
+31. Assumptions Log (Summary)
+#	Assumption	Rationale	Location
+A1	Idempotent replay applies to Blocked orders as well as Released orders	Most literal reading of “already completed OrderId”; not restricted to Released in the source text	Section 30, item 5
+A2	A ProductId with zero inventory records anywhere is treated as Blocked / insufficient-inventory, not a distinct error type	No qualifying-warehouse condition is a superset that naturally covers this case	Section 30, item 3
+A3	Proposed (unconfirmed) literal reason codes "blocked-insufficient-inventory" and "blocked-delivery-date"	Specification requires deterministic, testable reason values but does not supply the literal strings	Section 30, item 2
+A4	Minimal single-role authenticated-user model (no differentiated permissions)	No role model or login flow is specified anywhere in either source document	Section 30, item 6
+A5	CustomerId-not-found is treated as 404	Not explicitly stated; consistent with GET /orders/{OrderId}’s confirmed 404 pattern	Section 30, item 1
+All five items should be confirmed or overridden by the business/implementation stakeholder before being treated as final.
